@@ -1,0 +1,102 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# --- Virtual environments ---
+.venv/
+venv/
+env/
+ENV/
+.python-version
+
+# --- Packaging / tooling caches ---
+.uv/
+uv.lock
+pip-log.txt
+pip-delete-this-directory.txt
+.ruff_cache/
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
+.pytype/
+.cython_debug/
+
+# --- Tests / coverage ---
+.pytest_cache/
+.tox/
+.nox/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.cache
+nosetests.xml
+*.cover
+.hypothesis/
+
+# --- Notebooks ---
+.ipynb_checkpoints/
+
+# --- Local config / secrets ---
+.env
+.env.*
+!.env.example
+config.local.yaml
+*.pem
+*.key
+secrets.yaml
+
+# --- Scraper output / local data ---
+# Telemetry lands in the output root; never commit collected rows.
+cold/
+data/
+out/
+*.parquet
+*.arrow
+*.feather
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+manifest.json
+heartbeat
+*.heartbeat
+
+# --- Logs ---
+*.log
+logs/
+
+# --- Editors / OS ---
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# --- Agent tooling ---
+.claude/settings.local.json
