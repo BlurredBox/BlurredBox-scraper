@@ -100,3 +100,4 @@ Thumbs.db
 
 # --- Agent tooling ---
 .claude/settings.local.json
+CLAUDE.md
