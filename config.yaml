@@ -1,0 +1,32 @@
+# Host identity. One entity_id per HOST, not per process — invariant 5.
+entity_id: vm1
+
+output_root: /var/lib/blurredbox-agd/cold
+heartbeat: /var/lib/blurredbox-agd/cold/heartbeat
+spool_dir: /var/lib/blurredbox-agd/spool     # step 6: sdk_hook.record() writes here
+
+watch:
+  # Substring match against the full cmdline, then the process name.
+  patterns: ["freqtrade", "uvicorn"]
+  pids: []                 # explicit pids, merged with pattern matches
+  refresh_seconds: 60      # rescan for new/dead processes
+
+cadence_seconds: 1         # the 1 Hz poll
+flush_seconds: 60          # buffer drain; bounds memory, not crash loss
+segment_seconds: 900       # parquet footer interval; bounds crash loss — see D1
+max_disk_pct: 90           # refuse to write above this, loudly
+
+# Optional. Path to the BlurredBox-AGD checkout; enables SystemMetricsPoller
+# for host-level GPU/freqtrade fields (invariant 8). Omit to use pynvml directly.
+# agd_repo: /home/you/Desktop/BlurredBox-AGD
+
+# Run-constant metadata, copied verbatim into manifest.json. Keys must be a
+# subset of schema.MANIFEST_FIELDS or startup fails.
+manifest:
+  model_id: ""
+  model_version_id: ""
+  slug: ""
+  tenant_id: ""
+  operator_id: ""
+  environment: production
+  artifact_id: ""

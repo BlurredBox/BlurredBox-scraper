@@ -1,0 +1,19 @@
+[project]
+name = "scraperd"
+version = "0.1.0"
+description = "Per-host telemetry daemon for model-serving processes"
+requires-python = ">=3.11"
+dependencies = ["psutil", "nvidia-ml-py", "pyarrow", "pyyaml"]
+
+[project.optional-dependencies]
+dev = ["pytest", "duckdb", "pytz"]
+
+[project.scripts]
+scraperd = "scraperd.daemon:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["scraperd"]
