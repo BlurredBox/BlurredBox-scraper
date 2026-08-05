@@ -1,0 +1,30 @@
+[Unit]
+Description=scraperd — per-host telemetry for model-serving processes
+Documentation=file:///opt/scraperd/README.md
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/opt/scraperd/.venv/bin/scraperd --config /etc/scraperd/config.yaml
+Restart=always
+RestartSec=5
+
+# Reading /proc/<pid>/io and /proc/<pid>/fd for another user's process needs
+# privilege. Either run as root, or set User= to the same user as the watched
+# processes. A mismatch shows up as io_read_bytes and num_fds silently zero.
+User=root
+
+# SIGTERM -> the daemon's stop event -> flush -> footer -> rename. Give it room:
+# a stop that times out becomes SIGKILL and costs the open segment.
+KillSignal=SIGTERM
+TimeoutStopSec=90
+
+# Never let the collector starve the thing it is measuring.
+Nice=10
+IOSchedulingClass=idle
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
