@@ -3,7 +3,7 @@ entity_id: vm1
 
 output_root: /var/lib/blurredbox-agd/cold
 heartbeat: /var/lib/blurredbox-agd/cold/heartbeat
-# spool_dir: /var/lib/blurredbox-agd/spool   # uncomment at step 6
+spool_dir: /var/lib/blurredbox-agd/spool     # step 6: sdk_hook.record() writes here
 
 watch:
   # Substring match against the full cmdline, then the process name.
