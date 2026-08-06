@@ -54,21 +54,26 @@ class TableWriter:
 
     def flush(self) -> int:
         """Drain the buffer into the current segment. Returns rows written."""
+        pct = self._disk_pct()
+        if pct >= self.max_disk_pct:
+            dropped, self._rows = len(self._rows), []
+            self.dropped += dropped
+            log.error(
+                "DISK %.1f%% >= threshold %.1f%% — REFUSING TO WRITE. "
+                "Dropped %d rows this flush, %d total. Heartbeat NOT touched — "
+                "the cron check will alert. Free space or the run is over.",
+                pct, self.max_disk_pct, dropped, self.dropped,
+            )
+            return 0
+
+        # Touched only on a flush that could actually write. A heartbeat that
+        # stays fresh through a full disk is worse than none — it reassures
+        # while the run dies.
         self._touch_heartbeat()
         if not self._rows:
             self._close_if_stale()
             return 0
         rows, self._rows = self._rows, []
-
-        pct = self._disk_pct()
-        if pct >= self.max_disk_pct:
-            self.dropped += len(rows)
-            log.error(
-                "DISK %.1f%% >= threshold %.1f%% — REFUSING TO WRITE. "
-                "Dropped %d rows this flush, %d total. Free space or the run is over.",
-                pct, self.max_disk_pct, len(rows), self.dropped,
-            )
-            return 0
 
         written, batch = 0, []
         for row in rows:

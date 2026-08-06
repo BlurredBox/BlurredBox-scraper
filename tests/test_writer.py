@@ -148,3 +148,13 @@ def test_a_stray_latency_never_reaches_the_samples_file(tmp_path):
         f"SELECT * FROM read_parquet('{tmp_path}/cold/samples/*/*.parquet')"
     ).columns
     assert "latency_ms" not in cols
+
+
+def test_full_disk_leaves_the_heartbeat_stale(tmp_path):
+    """A fresh heartbeat through a full disk reassures while the run dies."""
+    w = mk(tmp_path, max_disk_pct=0.0)
+    hb = tmp_path / "cold" / "heartbeat"
+    w.add(sample(T0))
+    assert w.flush() == 0
+    assert w.dropped == 1
+    assert not hb.exists()                 # cron check goes stale and alerts
