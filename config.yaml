@@ -7,7 +7,10 @@ spool_dir: /var/lib/blurredbox-agd/spool     # step 6: sdk_hook.record() writes 
 
 watch:
   # Substring match against the full cmdline, then the process name.
-  patterns: ["freqtrade", "uvicorn"]
+  # "freqtrade trade" hits the 12 real python workers only — excludes the
+  # entrypoint*.sh wrappers and track_freqtrade.py. uvicorn dropped: nothing
+  # serves under it on this host.
+  patterns: ["freqtrade trade"]
   pids: []                 # explicit pids, merged with pattern matches
   refresh_seconds: 60      # rescan for new/dead processes
 
@@ -18,8 +21,13 @@ watch:
 # the d=5 gpu fields come from sdk_hook's request rows, not from this table.
 # On a CPU-only host the gpu_* three are pure zeros; num_connections is 0 for a
 # process in another network namespace (docker) and costs a /proc/net scan.
-skip_fields: []
-# skip_fields: [gpu_usage, gpu_vram_mb, gpu_temperature, num_connections]
+# freqtrade_* dropped too: the poller logs "Multiple Freqtrade candidates
+# detected (37)" and resolves to a 0.32 MB RSS process — an
+# entrypoint.chaos-entity.sh wrapper, not a worker. One arbitrary process out of
+# 12 identical ones, and the per-process numbers are already in this table as
+# process_id + cpu_usage + memory_usage_mb. Set FREQTRADE_PID in the environment
+# to pin a specific process if a host ever needs these fields.
+skip_fields: [gpu_usage, gpu_vram_mb, gpu_temperature, num_connections, freqtrade_cpu, freqtrade_memory_mb]
 
 cadence_seconds: 1         # the 1 Hz poll
 flush_seconds: 60          # buffer drain; bounds memory, not crash loss
@@ -29,7 +37,7 @@ max_disk_pct: 90           # refuse to write above this, loudly
 
 # Optional. Path to the BlurredBox-AGD checkout; enables SystemMetricsPoller
 # for host-level GPU/freqtrade fields (invariant 8). Omit to use pynvml directly.
-# agd_repo: /home/you/Desktop/BlurredBox-AGD
+agd_repo: /home/arameh64/Desktop/BlurredBox-AGD
 
 # Run-constant metadata, copied verbatim into manifest.json. Keys must be a
 # subset of schema.MANIFEST_FIELDS or startup fails.

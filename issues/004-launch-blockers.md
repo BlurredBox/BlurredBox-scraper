@@ -7,6 +7,34 @@ produces a usable dataset.
 [06](../fix-steps/06-answer-the-two-blocking-questions.md),
 [07](../fix-steps/07-install-on-the-target-host.md)
 
+## Status — 2026-08-06
+
+| | state | where |
+|---|---|---|
+| B1 | **fixed** | `patterns: ["freqtrade trade"]` — 36 → 12 processes, verified by a daemon run |
+| B2 | **fixed** | emit wired into `RequestTrackingMiddleware` (AGD); `record()` made stdlib-only, which is what had been silently breaking it |
+| B3 | **answered** | [ANSWERS.md](../ANSWERS.md) — 0 organic failures, 1,149 injected, injection already runs |
+| B4 | **fixed** | `gpu_*` in `skip_fields`; d=5 is effectively d=3 on a CPU-only host — the design question stands |
+| B5 | **fixed** | poller import was `ModuleNotFoundError: httpx`, not a missing `agd_repo`; see below |
+| B6 | **fixed** | `num_connections` in `skip_fields` |
+| B7 | **open** | `manifest.*` still `""` — run-constant, must be filled before the run starts |
+| — | **open** | nothing installed on a target host yet ([07](../fix-steps/07-install-on-the-target-host.md)) |
+
+Two things turned out to be different from what is written below:
+
+- **B2 was not "nothing calls `record()`".** `sdk/blurredbox_agd/tracking.py` already had the call,
+  in `_RequestContext.__exit__`, gated on `SCRAPERD_SPOOL`. Nothing called `track_request()`, so it
+  was dead code — and underneath that, `sdk_hook.record()` imported `.schema`, which imports
+  pyarrow, which the serving image does not have. Every call site swallows `ImportError`, so the
+  failure was invisible. The import is now function-local to `drain()`; the producer half is
+  stdlib-only, guarded by `tests/test_sdk_hook.py::test_record_needs_no_pyarrow`.
+- **B5 was not just a commented-out `agd_repo`.** Uncommenting it changed nothing: the import goes
+  through `src/connectors/__init__.py`, which pulls `FreqtradeConnector` → `httpx`. `init_host()`
+  now stubs the parent packages and loads the poller module directly. The poller then reports
+  "Multiple Freqtrade candidates detected (37)" and resolves a 0.32 MB `entrypoint.chaos-entity.sh`
+  wrapper, so `freqtrade_cpu` / `freqtrade_memory_mb` are in `skip_fields` too — the per-process
+  numbers are already in `samples`.
+
 Measurements below are from **this dev box**, 2026-08-06. The daemon runs on whichever host the
 watched processes live on (psutil reads `/proc`; it cannot scrape a remote host), so if that is
 a different machine, B1/B4/B5/B6 must be re-measured there. B2 and B3 hold everywhere.

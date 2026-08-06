@@ -7,6 +7,12 @@ is recoverable after 90 days have passed.
 These lived in `build-steps/ANSWERS.md`, deleted in `c0c203f` with both blank. Record the
 answers below and keep the file.
 
+**Answered 2026-08-06 in [ANSWERS.md](../ANSWERS.md).** Short version: organic failures are 0 —
+every positive in the incident record was injected by the chaos harness, which is already running.
+Positive count is a dial (0.2% observed), not a discovery, and the run must keep injection on for
+its whole duration. Population is 12 processes on 1 host = 93.3 M rows, ~4.3 GB worst case against
+367 GB free; the open part is the fleet size, since one host cannot produce a held-out entity.
+
 ---
 
 ## Q1 — Label count

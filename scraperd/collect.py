@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import sys
+import types
 from datetime import datetime, timezone
 
 import psutil
@@ -35,6 +36,20 @@ def init_host(agd_repo: str | None = None) -> None:
     if agd_repo:
         sys.path.insert(0, str(agd_repo))
         try:
+            # Stub the parent packages: src/connectors/__init__.py pulls
+            # FreqtradeConnector -> httpx, not a scraperd dependency. The poller
+            # module itself only needs stdlib + psutil.
+            from pathlib import Path
+
+            root = Path(agd_repo)
+            for name, d in (
+                ("src", root / "src"),
+                ("src.connectors", root / "src" / "connectors"),
+            ):
+                if name not in sys.modules:
+                    m = types.ModuleType(name)
+                    m.__path__ = [str(d)]
+                    sys.modules[name] = m
             from src.connectors.system_metrics_poller import SystemMetricsPoller
 
             _HOST["poller"] = SystemMetricsPoller()
