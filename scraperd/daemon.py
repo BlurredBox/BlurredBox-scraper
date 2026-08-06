@@ -23,13 +23,15 @@ log = logging.getLogger("scraperd")
 
 
 def load_config(path: str | Path) -> dict:
-    cfg = yaml.safe_load(Path(path).read_text())
+    # `or {}`, not setdefault, throughout: a YAML key written with no value
+    # (`watch:`) is present-and-None, so setdefault leaves the None in place.
+    cfg = yaml.safe_load(Path(path).read_text()) or {}
     cfg.setdefault("cadence_seconds", 1)
     cfg.setdefault("flush_seconds", 60)
     cfg.setdefault("segment_seconds", 900)
     cfg.setdefault("request_segment_seconds", 60)
     cfg.setdefault("max_disk_pct", 90.0)
-    cfg.setdefault("watch", {})
+    cfg["watch"] = cfg.get("watch") or {}
     cfg["watch"].setdefault("patterns", [])
     cfg["watch"].setdefault("pids", [])
     cfg["watch"].setdefault("refresh_seconds", 60)
@@ -63,7 +65,7 @@ def write_manifest(cfg: dict, root: Path) -> Path:
         "python_version": platform.python_version(),
         "cpu_count": psutil.cpu_count(),
         "total_memory_mb": round(psutil.virtual_memory().total / (1024 * 1024), 1),
-        "version": cfg.get("manifest", {}).get("version") or __version__,
+        "version": (cfg.get("manifest") or {}).get("version") or __version__,
     })
     unknown = set(m) - set(schema.MANIFEST_FIELDS)
     if unknown:

@@ -9,7 +9,7 @@ import pyarrow.parquet as pq
 import pytest
 
 from scraperd import collect, schema
-from scraperd.daemon import load_config
+from scraperd.daemon import load_config, write_manifest
 from scraperd.writer import TableWriter
 
 SKIP = frozenset({"num_connections", "gpu_usage", "gpu_vram_mb", "gpu_temperature"})
@@ -45,4 +45,20 @@ def test_config_refuses_bad_skip_field(tmp_path, bad):
     cfg = tmp_path / "c.yaml"
     cfg.write_text(f"entity_id: t\noutput_root: {tmp_path}\nskip_fields: [{bad}]\n")
     with pytest.raises(SystemExit, match=bad):
+        load_config(cfg)
+
+
+def test_valueless_keys_are_not_a_traceback(tmp_path):
+    """`watch:`/`manifest:` with nothing after them parse to None, not {}."""
+    cfg = tmp_path / "c.yaml"
+    cfg.write_text(f"entity_id: t\noutput_root: {tmp_path}\nwatch:\nmanifest:\n")
+    loaded = load_config(cfg)
+    assert loaded["watch"] == {"patterns": [], "pids": [], "refresh_seconds": 60}
+    assert write_manifest(loaded, tmp_path).exists()
+
+
+def test_empty_config_exits_readably(tmp_path):
+    cfg = tmp_path / "c.yaml"
+    cfg.write_text("")
+    with pytest.raises(SystemExit, match="entity_id"):
         load_config(cfg)
