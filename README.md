@@ -60,8 +60,10 @@ on a CPU-only box, `num_connections` for a process in another network namespace.
 schema is unaffected: a skipped field is never read and reads back null, so every host's files
 still glob together.
 
-Buffers in memory with a 60s row-group flush, bounding worst-case crash loss to 60 seconds
-out of 90 days. Every flush touches a heartbeat file, and a cron check alerts when it goes
+Buffers in memory with a 60s row-group flush, which bounds memory. Crash loss is bounded by the
+segment interval instead — a parquet file is unreadable until its footer is written at segment
+close: 900s for `samples`, 60s for `requests` (`request_segment_seconds`), since request rows are
+the only ones carrying `latency_ms`. Every flush touches a heartbeat file, and a cron check alerts when it goes
 stale — for an unattended run the realistic failure isn't corruption or schema drift, it's the
 daemon dying in week 3 and nobody noticing until week 12.
 

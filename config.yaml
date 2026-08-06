@@ -23,7 +23,8 @@ skip_fields: []
 
 cadence_seconds: 1         # the 1 Hz poll
 flush_seconds: 60          # buffer drain; bounds memory, not crash loss
-segment_seconds: 900       # parquet footer interval; bounds crash loss — see D1
+segment_seconds: 900       # samples: the 1 Hz firehose; bounds crash loss — see D1
+request_segment_seconds: 60  # requests: scarce d=5 rows, small files, 60s exposure
 max_disk_pct: 90           # refuse to write above this, loudly
 
 # Optional. Path to the BlurredBox-AGD checkout; enables SystemMetricsPoller

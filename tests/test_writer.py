@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from datetime import datetime, timedelta, timezone
 
 import duckdb
@@ -89,6 +90,17 @@ def test_resume_after_crash_writes_a_new_segment_beside_the_orphan(tmp_path):
         f"SELECT * FROM read_parquet('{tmp_path}/cold/samples/*/*.parquet', hive_partitioning=1)"
     ).fetchall()
     assert len(rows) == 5                  # loss is bounded to the open segment
+
+
+def test_idle_segment_closes_on_the_wall_clock(tmp_path):
+    """No second row means no rotate — the footer must land on the timer anyway."""
+    w = mk(tmp_path, segment_seconds=0.5)
+    w.add(sample(T0))
+    w.flush()
+    assert files(tmp_path) == []           # segment still open, still a .part
+    time.sleep(0.6)
+    w.flush()                              # no new rows; timer alone closes it
+    assert files(tmp_path) == ["2026-08-04T23-55.parquet"]
 
 
 def test_readback_matches_what_went_in(tmp_path):

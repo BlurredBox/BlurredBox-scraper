@@ -47,7 +47,7 @@ BlurredBox-scraper/
 | `scraperd/schema.py` | `CORE_V1` — a module-level frozen tuple of the five serving fields. `PROCESS_FIELDS` and `REQUEST_FIELDS` — the names from must-collect. `core_row(d)` builds the d=5 array and raises on any missing key. **This function is the only way a model input gets constructed.** Also the `pyarrow` schemas for both tables. |
 | `scraperd/collect.py` | One 1 Hz pass per watched process. Wraps `SystemMetricsPoller` / the SDK's `get_process_metrics()` when the main repo is importable; falls back to direct `psutil` + `pynvml` otherwise. Returns plain dicts. No latency — see §4.1. |
 | `scraperd/sdk_hook.py` | Receives per-request metrics from `sdk/blurredbox_agd/metrics.py`, where all five d=5 fields already co-occur, and hands them to the writer tagged `source="request"`. This is the only path that produces a trainable row. |
-| `scraperd/writer.py` | `pyarrow.ParquetWriter` per table per day. Buffers in memory, writes a row group every 60s, fsyncs and closes on date rollover and on SIGTERM. Worst-case crash loss is one flush interval — 60 seconds out of 90 days. Touches the heartbeat on every flush. Refuses to write and logs loudly above the disk threshold. |
+| `scraperd/writer.py` | `pyarrow.ParquetWriter` per table per day. Buffers in memory, writes a row group every 60s, and closes the segment (footer + rename off `.part`) on `segment_seconds`, date rollover and SIGTERM. Worst-case hard-kill loss is one segment — 900s for `samples`, 60s for `requests` via `request_segment_seconds`. Touches the heartbeat on every flush. Refuses to write and logs loudly above the disk threshold. |
 | `scraperd/daemon.py` | asyncio loop: schedule `collect` at cadence, drain `sdk_hook`, drive `writer` flushes, write `manifest.json` at startup, handle SIGTERM → flush → close. Everything else is a function call from here. |
 | `deploy/scraperd.service` | systemd, `Restart=always`, config path from env. |
 | `deploy/heartbeat-check.sh` | Cron entry: if the heartbeat file's mtime is older than N minutes, alert. Ten lines. **This is the single highest-value file in the repo** — see §5.1. |
@@ -100,9 +100,9 @@ A separate projection module with a `VIEWS` registry catches the same bug. It is
 
 ### 4.4 Parquet directly, no SQLite tier
 
-architecture §6.2 argues Parquet is built for batch writes, not streaming appends, and that writing it directly moves the buffering problem into unprotected memory. True in general; the numbers say otherwise here. `ParquetWriter` appends row groups incrementally, and a 60s flush bounds crash loss to 60 seconds out of 7.8M rows.
+architecture §6.2 argues Parquet is built for batch writes, not streaming appends, and that writing it directly moves the buffering problem into unprotected memory. True in general; the numbers say otherwise here. `ParquetWriter` appends row groups incrementally, and the segment timer bounds hard-kill loss to one segment — 60 seconds for the scarce `requests` rows, 900 for the `samples` firehose.
 
-The SQLite tier buys crash safety on a 4 MB working set, plus queryable-while-live — which `duckdb` over yesterday's file already gives you, since today's partial file is readable after any flush.
+The SQLite tier buys crash safety on a 4 MB working set, plus queryable-while-live — which `duckdb` over the closed segments already gives you, since a segment becomes readable the moment its footer lands.
 
 ### 4.5 No pydantic
 

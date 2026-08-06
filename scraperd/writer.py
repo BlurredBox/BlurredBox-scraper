@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 import os
 import shutil
+import time
 from pathlib import Path
 
 import pyarrow as pa
@@ -45,6 +46,7 @@ class TableWriter:
         self._part: Path | None = None
         self._final: Path | None = None
         self._seg_start = None
+        self._seg_opened = 0.0
 
     # ── public ────────────────────────────────────────────────────────
     def add(self, row: dict) -> None:
@@ -54,6 +56,7 @@ class TableWriter:
         """Drain the buffer into the current segment. Returns rows written."""
         self._touch_heartbeat()
         if not self._rows:
+            self._close_if_stale()
             return 0
         rows, self._rows = self._rows, []
 
@@ -74,17 +77,14 @@ class TableWriter:
                 batch = []
                 self._rotate(row["timestamp"])
             batch.append(row)
-        return written + self._write(batch)
+        written += self._write(batch)
+        self._close_if_stale()
+        return written
 
     def close(self) -> None:
         """Write the footer and publish the segment. Idempotent."""
         self.flush()
-        if self._w is None:
-            return
-        self._w.close()
-        os.replace(self._part, self._final)
-        log.info("segment closed: %s", self._final)
-        self._w = self._part = self._final = self._seg_start = None
+        self._close_segment()
 
     # ── internals ─────────────────────────────────────────────────────
     def _touch_heartbeat(self) -> None:
@@ -103,11 +103,32 @@ class TableWriter:
             or (ts - self._seg_start).total_seconds() >= self.segment_seconds
         )
 
+    def _close_if_stale(self) -> None:
+        """Footer an idle segment on the wall clock.
+
+        _needs_rotate only fires when the *next* row arrives, so a table with
+        gaps in its traffic — requests, mostly — would otherwise sit on an
+        unreadable .part indefinitely and lose it all to a SIGKILL.
+        """
+        if self._w is None:
+            return
+        # Wall clock since the segment *opened*, not row time: drained request
+        # rows are up to two minutes old, and that lag is not exposure.
+        if time.monotonic() - self._seg_opened >= self.segment_seconds:
+            self._close_segment()
+
+    def _close_segment(self) -> None:
+        if self._w is None:
+            return
+        self._w.close()
+        os.replace(self._part, self._final)
+        log.info("segment closed: %s", self._final)
+        self._w = self._part = self._final = self._seg_start = None
+
     def _rotate(self, ts) -> None:
-        if self._w is not None:
-            self._w.close()
-            os.replace(self._part, self._final)
+        self._close_segment()
         self._seg_start = ts
+        self._seg_opened = time.monotonic()
         self._final = self._segment_path(ts)
         self._part = self._final.with_name(self._final.name + ".part")
         self._w = pq.ParquetWriter(self._part, self.schema, compression=self.compression)

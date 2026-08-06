@@ -27,6 +27,7 @@ def load_config(path: str | Path) -> dict:
     cfg.setdefault("cadence_seconds", 1)
     cfg.setdefault("flush_seconds", 60)
     cfg.setdefault("segment_seconds", 900)
+    cfg.setdefault("request_segment_seconds", 60)
     cfg.setdefault("max_disk_pct", 90.0)
     cfg.setdefault("watch", {})
     cfg["watch"].setdefault("patterns", [])
@@ -126,16 +127,19 @@ async def run(cfg: dict) -> None:
     write_manifest(cfg, root)
     collect.init_host(cfg.get("agd_repo"))
 
-    def mk(table, tbl_schema):
+    def mk(table, tbl_schema, segment_seconds):
         return TableWriter(
             root=root, table=table, schema=tbl_schema,
             entity_id=cfg["entity_id"], heartbeat=heartbeat,
-            max_disk_pct=cfg["max_disk_pct"], segment_seconds=cfg["segment_seconds"],
+            max_disk_pct=cfg["max_disk_pct"], segment_seconds=segment_seconds,
         )
 
-    writers = {"samples": mk("samples", schema.SAMPLES_SCHEMA)}
+    writers = {"samples": mk("samples", schema.SAMPLES_SCHEMA, cfg["segment_seconds"])}
     if cfg.get("spool_dir"):
-        writers["requests"] = mk("requests", schema.REQUESTS_SCHEMA)
+        # drain() unlinks the spool file, so a request row lives only in RAM + an
+        # unfootered .part until the segment closes. Short segments bound that.
+        writers["requests"] = mk("requests", schema.REQUESTS_SCHEMA,
+                                 cfg["request_segment_seconds"])
 
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
