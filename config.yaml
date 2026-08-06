@@ -11,6 +11,16 @@ watch:
   pids: []                 # explicit pids, merged with pattern matches
   refresh_seconds: 60      # rescan for new/dead processes
 
+# Fields not worth their syscall on this host. The column stays in the parquet
+# schema and reads back null — the schema is fixed so every day's file still
+# globs together. process_id, timestamp, cpu_usage and memory_usage_mb are what
+# makes a poll row a poll row and cannot be listed; gpu_* here can be, because
+# the d=5 gpu fields come from sdk_hook's request rows, not from this table.
+# On a CPU-only host the gpu_* three are pure zeros; num_connections is 0 for a
+# process in another network namespace (docker) and costs a /proc/net scan.
+skip_fields: []
+# skip_fields: [gpu_usage, gpu_vram_mb, gpu_temperature, num_connections]
+
 cadence_seconds: 1         # the 1 Hz poll
 flush_seconds: 60          # buffer drain; bounds memory, not crash loss
 segment_seconds: 900       # parquet footer interval; bounds crash loss — see D1

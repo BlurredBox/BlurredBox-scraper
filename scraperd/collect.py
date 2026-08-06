@@ -52,10 +52,17 @@ def init_host(agd_repo: str | None = None) -> None:
         log.info("no GPU backend (%s) — gpu_* will be 0.0", exc)
 
 
-def host_metrics() -> dict:
-    """Host-wide fields shared by every sample in a tick."""
-    out = dict(_HOST_DEFAULTS)
-    out["disk_usage_pct"] = psutil.disk_usage("/").percent
+def host_metrics(skip: frozenset[str] = frozenset()) -> dict:
+    """Host-wide fields shared by every sample in a tick.
+
+    Names in `skip` are neither sampled nor emitted; the column stays in the
+    parquet schema and reads back null.
+    """
+    out = {k: v for k, v in _HOST_DEFAULTS.items() if k not in skip}
+    if "disk_usage_pct" not in skip:
+        out["disk_usage_pct"] = psutil.disk_usage("/").percent
+    if not out:
+        return out
 
     poller = _HOST["poller"]
     if poller is not None:
@@ -65,18 +72,22 @@ def host_metrics() -> dict:
             # latency. Dropped here on purpose — invariant 1. Never copy it
             # into a sample row.
             for k in _HOST_DEFAULTS:
-                out[k] = float(t.get(k) or 0.0)
+                if k in out:
+                    out[k] = float(t.get(k) or 0.0)
         except Exception as exc:
             log.warning("poller failed, zeros this tick: %s", exc)
         return out
 
     nvml = _HOST["nvml"]
-    if nvml is not None:
+    if nvml is not None and {"gpu_usage", "gpu_vram_mb", "gpu_temperature"} & set(out):
         try:
             h = nvml.nvmlDeviceGetHandleByIndex(0)
-            out["gpu_usage"] = float(nvml.nvmlDeviceGetUtilizationRates(h).gpu)
-            out["gpu_vram_mb"] = nvml.nvmlDeviceGetMemoryInfo(h).used / (1024 * 1024)
-            out["gpu_temperature"] = float(nvml.nvmlDeviceGetTemperature(h, 0))
+            if "gpu_usage" in out:
+                out["gpu_usage"] = float(nvml.nvmlDeviceGetUtilizationRates(h).gpu)
+            if "gpu_vram_mb" in out:
+                out["gpu_vram_mb"] = nvml.nvmlDeviceGetMemoryInfo(h).used / (1024 * 1024)
+            if "gpu_temperature" in out:
+                out["gpu_temperature"] = float(nvml.nvmlDeviceGetTemperature(h, 0))
         except Exception as exc:
             log.warning("nvml failed, zeros this tick: %s", exc)
     return out
@@ -123,21 +134,41 @@ def _io(proc: psutil.Process) -> tuple[int, int]:
         return 0, 0
 
 
-def sample(proc: psutil.Process, host: dict) -> dict:
-    """One `samples` row. Raises psutil.NoSuchProcess if the target died."""
+# Per-process fields that may be switched off in config (`skip_fields`). The
+# mandatory rest — process_id, cpu_usage, memory_usage_mb, timestamp — are the
+# reason the daemon exists; two of them are CORE_V1.
+_OPTIONAL = {
+    "memory_pct": lambda p: float(p.memory_percent()),
+    "num_threads": lambda p: p.num_threads(),
+    "num_fds": _num_fds,
+    "num_connections": _num_connections,
+    "ctx_switches": lambda p: sum(p.num_ctx_switches()),
+}
+
+
+def sample(proc: psutil.Process, host: dict, skip: frozenset[str] = frozenset()) -> dict:
+    """One `samples` row. Raises psutil.NoSuchProcess if the target died.
+
+    Fields in `skip` are not read at all — the syscall is what costs, not the
+    column — and are left out of the row, which parquet writes as null.
+    """
     with proc.oneshot():
-        ctx = proc.num_ctx_switches()
         row = {
             "process_id": proc.pid,
             "cpu_usage": float(proc.cpu_percent(interval=None)),
             "memory_usage_mb": proc.memory_info().rss / (1024 * 1024),
-            "memory_pct": float(proc.memory_percent()),
-            "num_threads": proc.num_threads(),
-            "num_fds": _num_fds(proc),
-            "num_connections": _num_connections(proc),
-            "ctx_switches": ctx.voluntary + ctx.involuntary,
             "timestamp": datetime.now(timezone.utc),
         }
-    row["io_read_bytes"], row["io_write_bytes"] = _io(proc)
+        for name, fn in _OPTIONAL.items():
+            if name not in skip:
+                row[name] = fn(proc)
+    # One io_counters() call yields both, so it is worth making only if a
+    # consumer wants at least one of them.
+    if {"io_read_bytes", "io_write_bytes"} - skip:
+        read, write = _io(proc)
+        if "io_read_bytes" not in skip:
+            row["io_read_bytes"] = read
+        if "io_write_bytes" not in skip:
+            row["io_write_bytes"] = write
     row.update(host)
     return row

@@ -28,6 +28,10 @@ def main() -> int:
 
     S = f"read_parquet('{root}/samples/*/*.parquet', hive_partitioning=1)"
     R = f"read_parquet('{root}/requests/*/*.parquet', hive_partitioning=1)"
+    # Until sdk_hook.record() is wired into the serving process there is no
+    # requests table, and duckdb raises on the empty glob rather than returning
+    # zero rows. That is the normal day-one state, not a failure.
+    has_requests = bool(glob.glob(f"{root}/requests/*/*.parquet"))
 
     print("\n== 1. coverage: every watched process present ==")
     duckdb.sql(f"""
@@ -50,12 +54,14 @@ def main() -> int:
     print("\n== 3. dead columns: which fields are all zero ==")
     duckdb.sql(f"""
     SELECT count(*) n,
-           count(*) FILTER (WHERE io_read_bytes = 0)  zero_io,
-           count(*) FILTER (WHERE gpu_usage = 0)      zero_gpu,
-           count(*) FILTER (WHERE num_fds = 0)        zero_fds,
-           count(*) FILTER (WHERE cpu_usage = 0)      zero_cpu
+           count(*) FILTER (WHERE coalesce(io_read_bytes, 0) = 0)  zero_io,
+           count(*) FILTER (WHERE coalesce(gpu_usage, 0)     = 0)  zero_gpu,
+           count(*) FILTER (WHERE coalesce(num_fds, 0)       = 0)  zero_fds,
+           count(*) FILTER (WHERE cpu_usage = 0)                   zero_cpu,
+           count(*) - count(num_connections)                       null_conn
     FROM {S}""").show()
     print("zero io/fds = permissions (User= in deploy). zero gpu = CPU-only host or no NVML.")
+    print("a null column is a deliberate skip_fields entry, not a collection failure")
 
     print("\n== 4. size projection: does 90 days fit ==")
     mb, first, last = duckdb.sql(f"""
@@ -72,9 +78,10 @@ def main() -> int:
     print("\n== 5. invariants ==")
     assert "latency_ms" not in duckdb.sql(f"SELECT * FROM {S} LIMIT 0").columns, \
         "samples has a latency_ms column — invariant 1"
-    assert duckdb.sql(
-        f"SELECT count(*) FROM {R} WHERE latency_ms IS NULL OR latency_ms <= 0"
-    ).fetchone()[0] == 0, "requests rows with null/non-positive latency_ms"
+    if has_requests:
+        assert duckdb.sql(
+            f"SELECT count(*) FROM {R} WHERE latency_ms IS NULL OR latency_ms <= 0"
+        ).fetchone()[0] == 0, "requests rows with null/non-positive latency_ms"
     assert duckdb.sql(f"SELECT count(DISTINCT entity_id) FROM {S}").fetchone()[0] == 1, \
         "more than one entity_id — invariant 5"
     stale = [p for p in glob.glob(f"{root}/*/*/*.part")
@@ -83,6 +90,11 @@ def main() -> int:
     print("all four pass")
 
     print("\n== 6. the d=5 path ==")
+    if not has_requests:
+        print("no requests table yet — sdk_hook.record() is not wired into the "
+              "serving process, so no row carries a real latency_ms and no d=5 "
+              "row exists. This is step 6, not a check failure.")
+        return 0
     from scraperd.schema import core_row
     # ponytail: dicts by hand, not .df() — pandas/numpy are not runtime deps here.
     q = duckdb.sql(f"SELECT * FROM {R} LIMIT 5")

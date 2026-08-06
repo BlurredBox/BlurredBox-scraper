@@ -34,6 +34,18 @@ def load_config(path: str | Path) -> dict:
     cfg["watch"].setdefault("refresh_seconds", 60)
     if not cfg.get("entity_id"):
         raise SystemExit("config: entity_id is required (it is the host — invariant 5)")
+    cfg["skip_fields"] = frozenset(cfg.get("skip_fields") or [])
+    unknown = cfg["skip_fields"] - set(schema.SAMPLE_FIELDS)
+    if unknown:
+        raise SystemExit(f"config skip_fields: not a samples field: {sorted(unknown)}")
+    # What makes a poll row a poll row. Not a CORE_V1 check: samples never feeds
+    # core_row (invariant 3), so gpu_* here may legitimately be switched off on a
+    # CPU-only host — the d=5 gpu fields come from sdk_hook, not from this table.
+    locked = cfg["skip_fields"] & {
+        "process_id", "timestamp", "cpu_usage", "memory_usage_mb",
+    }
+    if locked:
+        raise SystemExit(f"config skip_fields: cannot skip {sorted(locked)}")
     return cfg
 
 
@@ -80,10 +92,10 @@ async def sample_loop(cfg: dict, writer: TableWriter, stop: asyncio.Event) -> No
                 procs.pop(pid)
             last_refresh = now
 
-        host = collect.host_metrics()
+        host = collect.host_metrics(cfg["skip_fields"])
         for pid in list(procs):
             try:
-                writer.add(collect.sample(procs[pid], host))
+                writer.add(collect.sample(procs[pid], host, cfg["skip_fields"]))
             except psutil.Error as exc:
                 log.warning("sample %d failed: %s", pid, exc)
                 procs.pop(pid, None)

@@ -55,6 +55,11 @@ existing `SystemMetricsPoller` / `get_process_metrics()` are importable it wraps
 than forking; otherwise it falls back to `psutil` + `pynvml` directly, so it runs against a
 process regardless of what SDK that process uses.
 
+`skip_fields:` switches off fields not worth their syscall on a given host — the `gpu_*` three
+on a CPU-only box, `num_connections` for a process in another network namespace. The parquet
+schema is unaffected: a skipped field is never read and reads back null, so every host's files
+still glob together.
+
 Buffers in memory with a 60s row-group flush, bounding worst-case crash loss to 60 seconds
 out of 90 days. Every flush touches a heartbeat file, and a cron check alerts when it goes
 stale — for an unattended run the realistic failure isn't corruption or schema drift, it's the
