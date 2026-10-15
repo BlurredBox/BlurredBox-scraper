@@ -20,6 +20,29 @@ max_disk_pct: 90           # refuse to write above this, loudly
 # for host-level GPU/freqtrade fields (invariant 8). Omit to use pynvml directly.
 # agd_repo: /home/you/Desktop/BlurredBox-AGD
 
+# monitor_v4: windowed drift / anomaly / output / calibration / trading / ops /
+# data-quality metrics -> output_root/monitor/. Needs spool_dir and the
+# [monitor] extra (numpy, scipy, scikit-learn). See must-collect.md.
+monitor:
+  enabled: false
+  window_seconds: 300
+  # Both hold feature names and raw values. Partner-local: startup refuses
+  # either one inside output_root.
+  state_dir: /var/lib/blurredbox-agd/state            # frozen drift reference
+  partner_local_root: /var/lib/blurredbox-agd/local   # per-feature drift table
+  reference_rows: 2000            # inputs frozen as the drift reference
+  max_window_rows: 5000           # per-window reservoir; more = shed_event_flag
+  min_window_rows: 50             # fewer inputs -> estimator_valid false
+  min_ops_rows: 10                # fewer requests -> latency/rate _valid false
+  expected_requests_per_window:   # empty: median of the last 12 full windows
+  outcome_ttl_seconds: 604800     # how long a prediction waits for its outcome
+  max_pending_outcomes: 200000
+  hit_rate_rolling_n: 1000
+  bar_seconds: 60                 # market bars for vol / liquidity / correlation
+  rolling_bars: 1440              # tr_cross_asset_corr_rolling horizon
+  decision_threshold: 0.5         # binary score -> positive decision
+  # alarms: {psi_aggregate: 0.2, ...}   # override monitor.DEFAULT_ALARMS
+
 # Run-constant metadata, copied verbatim into manifest.json. Keys must be a
 # subset of schema.MANIFEST_FIELDS or startup fails.
 manifest:

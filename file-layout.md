@@ -23,7 +23,9 @@ BlurredBox-scraper/
 │   ├── __init__.py             # version only
 │   ├── schema.py               # field lists + CORE_V1 + the one array builder
 │   ├── collect.py              # 1 Hz psutil/pynvml sampling
-│   ├── sdk_hook.py             # per-request rows (the only source of latency_ms)
+│   ├── sdk_hook.py             # per-request rows (the only source of latency_ms) + monitor events
+│   ├── detectors.py            # monitor_v4: pure drift/anomaly/calibration/trading statistics
+│   ├── monitor.py              # monitor_v4: windows, reference, outcome joins, market bars
 │   ├── writer.py               # parquet row-group writer, daily rotation
 │   └── daemon.py               # asyncio loop, heartbeat, disk check, SIGTERM flush
 │
@@ -33,7 +35,8 @@ BlurredBox-scraper/
 │
 └── tests/
     ├── test_schema.py          # CORE_V1 is frozen; every must-collect field declared
-    └── test_writer.py          # rotation, crash-resume, readback
+    ├── test_writer.py          # rotation, crash-resume, readback
+    └── test_monitor.py         # detectors fire on shifts; nothing partner-private ships
 ```
 
 16 entries, 12 of them code or config. Roughly 300–400 lines.
@@ -49,6 +52,8 @@ BlurredBox-scraper/
 | `scraperd/sdk_hook.py` | Receives per-request metrics from `sdk/blurredbox_agd/metrics.py`, where all five d=5 fields already co-occur, and hands them to the writer tagged `source="request"`. This is the only path that produces a trainable row. |
 | `scraperd/writer.py` | `pyarrow.ParquetWriter` per table per day. Buffers in memory, writes a row group every 60s, fsyncs and closes on date rollover and on SIGTERM. Worst-case crash loss is one flush interval — 60 seconds out of 90 days. Touches the heartbeat on every flush. Refuses to write and logs loudly above the disk threshold. |
 | `scraperd/daemon.py` | asyncio loop: schedule `collect` at cadence, drain `sdk_hook`, drive `writer` flushes, write `manifest.json` at startup, handle SIGTERM → flush → close. Everything else is a function call from here. |
+| `scraperd/detectors.py` | monitor_v4 statistics as pure functions: per-feature drift, MMD, Mahalanobis, half-space trees, score shape, calibration, trading. Return None, never 0.0, when a number can't be computed honestly. |
+| `scraperd/monitor.py` | monitor_v4 state: per-window reservoirs, the frozen reference (persisted to `state_dir`), prediction→outcome joins by `request_id`, market bars. Runs in an executor thread from the flush loop. Needs the `[monitor]` extra (numpy, scipy, scikit-learn) — the first deps beyond §2's list, and only when `monitor.enabled`. |
 | `deploy/scraperd.service` | systemd, `Restart=always`, config path from env. |
 | `deploy/heartbeat-check.sh` | Cron entry: if the heartbeat file's mtime is older than N minutes, alert. Ten lines. **This is the single highest-value file in the repo** — see §5.1. |
 | `tests/test_schema.py` | Asserts `CORE_V1` still has exactly those five names in that order, that `core_row` raises on a missing key, and that every field name in must-collect.md is declared somewhere in `schema.py`. The last one turns "we forgot to collect a field" into a CI failure. |
@@ -71,6 +76,8 @@ BlurredBox-scraper/
 `samples` — the 1 Hz poll: `process_id`, `cpu_usage`, `memory_usage_mb`, `memory_pct`, `gpu_usage`, `gpu_vram_mb`, `gpu_temperature`, `num_threads`, `num_fds`, `io_read_bytes`, `io_write_bytes`, `num_connections`, `ctx_switches`, `disk_usage_pct`, `freqtrade_cpu`, `freqtrade_memory_mb`, `timestamp`. No `latency_ms`.
 
 `requests` — one row per inference, from the SDK: the complete d=5 (`cpu_usage`, `memory_usage_mb`, `gpu_usage`, `gpu_vram_mb`, `latency_ms`) captured in a single snapshot, plus `request_id`, `process_id`, `input_size`, `output_size`, `status`, `prediction`, `timestamp`.
+
+`monitor` (optional) — one row per window of the monitor_v4 metrics; see must-collect.md. Its sibling `feature_drift` table carries feature names and is written under `monitor.partner_local_root`, never here.
 
 `manifest.json` — `entity_id`, `model_id`, `model_version_id`, `slug`, `tenant_id`, `operator_id`, `environment`, `artifact_id`, `version`, `schema_version`, run start time, host facts. These are constant for the whole run; they belong in one 400-byte file, not repeated across 7.8M rows.
 
@@ -134,7 +141,7 @@ Each of these has a home in architecture.md and a reason not to exist yet. The t
 |---|---|
 | SQLite write buffer | you actually lose data you needed, or the flush interval has to drop below ~10s |
 | Event collectors (`model_perf`, `fairness`, `policy_signals`, `action_taker_io`) | one at a time, when that bus emits real traffic. Writing four collectors against streams with no producers is the most expensive code there is, because nothing tells you it's wrong |
-| `drift_stats` collector | when a consumer reads it. The raw series is on disk; Welford and PSI can be computed after the fact from Parquet |
+| `drift_stats` collector | superseded for model inputs by monitor_v4 (`psi_aggregate` etc.), which must run on the partner host because feature values never leave it. Welford stats over the telemetry series remain deferred |
 | `sink.py` / ZeroMQ | when a live consumer exists. The stated 3-month goal is the Parquet tree itself |
 | `native/` C probe | when profiling shows psutil perturbs the measurement at your cadence. At 1 Hz it won't; architecture §2 concedes this |
 | Plugin registry / entry points | when someone outside the team writes a collector |

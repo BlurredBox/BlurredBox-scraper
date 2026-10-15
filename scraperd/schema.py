@@ -111,6 +111,120 @@ DECLARED_FIELDS: frozenset[str] = frozenset(
     SAMPLE_FIELDS + REQUEST_FIELDS + MANIFEST_FIELDS
 ) | frozenset(ALIASES) | DEFERRED_FIELDS
 
+# ── monitor_v4: one row per window, computed on the partner host ─────────────
+# Operations metrics. Each one is written with a sibling `<name>_valid` bool:
+# a null value with valid=False means "not measurable this window", which a
+# consumer must never read as zero.
+OPS_FIELDS: tuple[str, ...] = (
+    "inference_latency_p50",
+    "inference_latency_p95",
+    "inference_latency_p99",
+    "cpu_utilization",
+    "gpu_utilization",
+    "memory_headroom",
+    "request_rate",
+    "timeout_rate",
+    "exception_rate",
+    "retry_rate",
+    "queue_depth",
+    "feed_staleness_s",
+    "host_anomaly_score",
+)
+
+MONITOR_FIELDS: tuple[str, ...] = (
+    "window_start",
+    "window_seconds",
+    "n_inferences",
+    "n_outcomes",
+    # 1. input drift. Per-feature stats stay in FEATURE_DRIFT_FIELDS (partner
+    # only); psi_aggregate is the one per-feature number that leaves.
+    "psi_aggregate",
+    "mmd",
+    "mahalanobis_distance",
+    "covariance_delta",
+    "top_eigenvalue_ratio",
+    "pca_reconstruction_error",
+    "domain_classifier_drift",
+    # 2. anomaly detectors on inputs
+    "if_anomaly_mean",
+    "if_anomaly_fraction_high",
+    "hstrees_score",
+    "novelty_score",
+    # 3. model output shape
+    "score_mean",
+    "score_std",
+    "score_skew",
+    "score_kurtosis",
+    "score_p05",
+    "score_p25",
+    "score_p50",
+    "score_p75",
+    "score_p95",
+    "predictive_entropy",
+    "positive_decision_rate",
+    # 4. calibration and accuracy — only from outcomes that arrived this window
+    "brier",
+    "nll",
+    "ece",
+    "mce",
+    "ci_width",
+    "realised_metric",
+    "realised_metric_lag_s",
+    # 5. trading signals
+    "tr_hit_rate",
+    "tr_hit_rate_rolling",
+    "tr_realised_error",
+    "tr_signal_move_corr",
+    "tr_signal_move_ic",
+    "tr_realised_vol",
+    "tr_amihud_illiquidity",
+    "tr_log_volume_ratio",
+    "tr_spread_proxy",
+    "tr_cross_asset_corr",
+    "tr_cross_asset_corr_rolling",
+    "tr_turnover",
+    "tr_signal_autocorr",
+    "tr_output_scale_drift",
+    # 6. operations, each followed by its _valid flag
+    *(f for name in OPS_FIELDS for f in (name, f"{name}_valid")),
+    # 7. data quality and status
+    "row_count_vs_expected",
+    "ingest_incomplete_flag",
+    "ingest_dropped_fraction",
+    "unauthorized_deploy_flag",
+    "warmup_state",
+    "detector_alarms_fired",
+    "estimator_valid",
+    "aux_model_valid",
+    "shed_event_flag",
+    "rebaseline_event_flag",
+    "timestamp",
+)
+
+# Set only by our servers. scraperd runs on the partner host, so it always
+# writes null here and strips the key from anything the SDK sends.
+SERVER_ONLY_FIELDS: frozenset[str] = frozenset({"unauthorized_deploy_flag"})
+
+# Per-feature drift, one row per feature per window. Carries feature names, so
+# it is written under monitor.partner_local_root and never under output_root.
+FEATURE_DRIFT_FIELDS: tuple[str, ...] = (
+    "window_start",
+    "feature",
+    "feature_kind",
+    "psi",
+    "js_divergence",
+    "ks_statistic",
+    "wasserstein",
+    "chi_square",
+    "hellinger",
+    "new_category_rate",
+    "cardinality_change",
+    "domain_attribution",
+    "timestamp",
+)
+
+DECLARED_FIELDS = DECLARED_FIELDS | frozenset(MONITOR_FIELDS) | frozenset(FEATURE_DRIFT_FIELDS)
+
 _TS = pa.timestamp("us", tz="UTC")
 
 SAMPLES_SCHEMA = pa.schema([
@@ -148,8 +262,39 @@ REQUESTS_SCHEMA = pa.schema([
     ("timestamp", _TS),
 ])
 
+_MONITOR_TYPES: dict[str, pa.DataType] = {
+    "window_start": _TS,
+    "window_seconds": pa.int64(),
+    "n_inferences": pa.int64(),
+    "n_outcomes": pa.int64(),
+    "row_count_vs_expected": pa.float64(),
+    "ingest_incomplete_flag": pa.bool_(),
+    "ingest_dropped_fraction": pa.float64(),
+    "unauthorized_deploy_flag": pa.bool_(),
+    "warmup_state": pa.string(),
+    "detector_alarms_fired": pa.int64(),
+    "estimator_valid": pa.bool_(),
+    "aux_model_valid": pa.bool_(),
+    "shed_event_flag": pa.bool_(),
+    "rebaseline_event_flag": pa.bool_(),
+    "timestamp": _TS,
+} | {f"{name}_valid": pa.bool_() for name in OPS_FIELDS}
+
+# Everything not typed above is a nullable float metric.
+MONITOR_SCHEMA = pa.schema(
+    [(f, _MONITOR_TYPES.get(f, pa.float64())) for f in MONITOR_FIELDS]
+)
+
+FEATURE_DRIFT_SCHEMA = pa.schema(
+    [(f, {"window_start": _TS, "timestamp": _TS, "feature": pa.string(),
+          "feature_kind": pa.string()}.get(f, pa.float64()))
+     for f in FEATURE_DRIFT_FIELDS]
+)
+
 assert tuple(SAMPLES_SCHEMA.names) == SAMPLE_FIELDS
 assert tuple(REQUESTS_SCHEMA.names) == REQUEST_FIELDS
+assert tuple(MONITOR_SCHEMA.names) == MONITOR_FIELDS
+assert tuple(FEATURE_DRIFT_SCHEMA.names) == FEATURE_DRIFT_FIELDS
 
 
 def core_row(d: dict) -> list[float]:

@@ -6,7 +6,8 @@ requires-python = ">=3.11"
 dependencies = ["psutil", "nvidia-ml-py", "pyarrow", "pyyaml"]
 
 [project.optional-dependencies]
-dev = ["pytest", "duckdb", "pytz"]
+monitor = ["numpy", "scipy", "scikit-learn"]
+dev = ["pytest", "duckdb", "pytz", "numpy", "scipy", "scikit-learn"]
 
 [project.scripts]
 scraperd = "scraperd.daemon:main"

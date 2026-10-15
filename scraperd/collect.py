@@ -52,6 +52,11 @@ def init_host(agd_repo: str | None = None) -> None:
         log.info("no GPU backend (%s) — gpu_* will be 0.0", exc)
 
 
+def gpu_available() -> bool:
+    """True when gpu_* fields are measured rather than defaulted to 0.0."""
+    return _HOST["poller"] is not None or _HOST["nvml"] is not None
+
+
 def host_metrics() -> dict:
     """Host-wide fields shared by every sample in a tick."""
     out = dict(_HOST_DEFAULTS)

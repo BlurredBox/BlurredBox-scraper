@@ -37,6 +37,36 @@ Two tables, Hive-partitioned by `entity_id` (the host), one Parquet file per day
   `tenant_id`, `environment`, `schema_version`, host facts) in one 400-byte file instead of
   repeated across millions of rows.
 
+### monitor_v4 (optional, `monitor.enabled: true`)
+
+A third table, **`monitor`**, one row per window (default 300s), computed on the host from
+what the model process sends through `sdk_hook`: input drift (`psi_aggregate`, MMD,
+Mahalanobis, covariance/eigenvalue/PCA shift, domain-classifier AUC), input anomaly detectors
+(IsolationForest, half-space trees, LOF novelty), output-score shape, calibration against
+real outcomes, trading performance / market regime / model behaviour (`tr_*`), operations
+metrics each with a `_valid` flag, and data-quality/status flags. Full definitions in
+[must-collect.md](must-collect.md#monitor_v4--windowed-health-metrics-computed-on-the-partner-host).
+
+**Feature names never leave the partner host.** Per-feature drift (PSI, JS, KS,
+Wasserstein, chi-square, Hellinger, new-category rate, cardinality change, domain-classifier
+attribution) goes to a separate `feature_drift` table under `monitor.partner_local_root`, and
+the frozen reference sample to `monitor.state_dir`; startup refuses either path if it is
+inside `output_root`. `unauthorized_deploy_flag` is a column only our servers set —
+scraperd always writes null and strips it from spool input.
+
+In the model process:
+
+```python
+from scraperd import sdk_hook
+sdk_hook.record(spool, rid, latency_ms, features={"amount": 12.5, "region": "eu"},
+                score=p, signal=s, asset="BTC")
+sdk_hook.record_outcome(spool, rid, label=1, realised_move=0.004)   # whenever known
+sdk_hook.record_market(spool, "BTC", price, volume, bid, ask)
+sdk_hook.record_signal(spool, "host_anomaly_score", v)               # from System A
+```
+
+Needs `pip install '.[monitor]'` (numpy, scipy, scikit-learn), loaded only when enabled.
+
 `latency_ms` appears only on `requests` — it's request wall-clock, and the poller has no
 latency to emit. The two streams stay two tables so nothing joins a request's latency onto a
 nearby poll sample and produces a row that never existed as measured.
